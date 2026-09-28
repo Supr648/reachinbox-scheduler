@@ -6,8 +6,7 @@ dotenv.config();
 if (process.env.DATABASE_URL) {
 	const databaseUrl = new URL(process.env.DATABASE_URL);
 	if (!databaseUrl.searchParams.has("schema")) {
-		const defaultSchema = process.env.NODE_ENV === "production" ? "public" : "reachinbox_assignment";
-		const schema = process.env.DATABASE_SCHEMA || defaultSchema;
+		const schema = process.env.DATABASE_SCHEMA || "reachinbox_assignment";
 		if (!/^[a-zA-Z_][a-zA-Z0-9_]*$/.test(schema)) {
 			throw new Error("DATABASE_SCHEMA must be a valid PostgreSQL schema name");
 		}
