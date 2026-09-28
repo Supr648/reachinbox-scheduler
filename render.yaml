@@ -51,3 +51,14 @@ services:
         sync: false
       - key: QUEUE_DASHBOARD_PASSWORD
         sync: false
+  - type: web
+    name: reachinbox-frontend
+    runtime: node
+    rootDir: frontend
+    buildCommand: npm ci --include=dev && npm run build
+    startCommand: npm start
+    envVars:
+      - key: NODE_VERSION
+        value: 20
+      - key: NEXT_PUBLIC_API_URL
+        sync: false
