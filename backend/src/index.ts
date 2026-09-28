@@ -25,8 +25,8 @@ dotenv.config();
 const app = express();
 const port = Number(process.env.PORT) || 5000;
 const sessionSecret = process.env.SESSION_SECRET || "local-development-only-change-me";
-const frontendUrl = (process.env.FRONTEND_URL || "http://localhost:3000").replace(/\/+$/, "");
-const backendUrl = (process.env.BACKEND_URL || `http://localhost:${port}`).replace(/\/+$/, "");
+const frontendUrl = process.env.FRONTEND_URL || "http://localhost:3000";
+const backendUrl = process.env.BACKEND_URL || `http://localhost:${port}`;
 const sessionCookie = "reachinbox_session";
 const googleClientId = process.env.GOOGLE_CLIENT_ID;
 const googleClientSecret = process.env.GOOGLE_CLIENT_SECRET;
@@ -43,8 +43,7 @@ interface AuthenticatedRequest extends Request {
 const sessionCookieOptions = {
   httpOnly: true,
   secure: process.env.NODE_ENV === "production",
-  // Frontend and API live on different onrender.com subdomains (cross-site), so production needs SameSite=None; Secure.
-  sameSite: (process.env.NODE_ENV === "production" ? "none" : "lax") as "none" | "lax",
+  sameSite: "lax" as const,
   maxAge: 7 * 24 * 60 * 60 * 1000,
   path: "/",
 };
@@ -65,13 +64,6 @@ app.use(cors({
 }));
 app.use(express.json({ limit: "2mb" }));
 app.use(cookieParser());
-
-app.get("/", (_req, res) => res.json({
-  service: "reachinbox-scheduler-api",
-  status: "ok",
-  health: "/health",
-  frontend: frontendUrl,
-}));
 
 app.get("/api/auth/options", (_req, res) => {
   return res.json({ googleEnabled: Boolean(googleClientId && googleClientSecret) });
@@ -95,6 +87,14 @@ const requireSession = (req: Request, res: Response, next: NextFunction) => {
 
 const userIdOf = (req: Request) => (req as AuthenticatedRequest).userId as string;
 const signSession = (userId: string) => jwt.sign({ sub: userId }, sessionSecret, { expiresIn: "7d" });
+
+app.get("/", (_req, res) => {
+  res.json({
+    status: "ok",
+    message: "ReachInbox backend is running"
+  });
+});
+
 app.get("/health", (_req, res) => res.json({ status: "ok" }));
 
 app.post("/api/auth/dev-login", async (req, res) => {
