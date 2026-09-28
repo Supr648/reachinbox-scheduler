@@ -1,0 +1,24 @@
+# Secrets and local environment
+backend/.env
+frontend/.env.local
+.env
+.env.*
+!.env.example
+
+# Dependencies
+node_modules/
+**/node_modules/
+
+# Build output
+backend/dist/
+frontend/.next/
+frontend/out/
+
+# Local tooling and logs
+.vscode/
+*.log
+npm-debug.log*
+
+# Archives and local exports
+*.zip
+reachinbox-scheduler-export/

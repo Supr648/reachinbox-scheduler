@@ -1,0 +1,53 @@
+services:
+  - type: web
+    name: reachinbox-api
+    runtime: node
+    rootDir: backend
+    buildCommand: npm ci && npm run build
+    startCommand: npm start
+    healthCheckPath: /health
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: DATABASE_URL
+        sync: false
+      - key: REDIS_URL
+        sync: false
+      - key: ELASTICSEARCH_NODE
+        sync: false
+      - key: PORT
+        value: 10000
+      - key: BACKEND_URL
+        sync: false
+      - key: FRONTEND_URL
+        sync: false
+      - key: SESSION_SECRET
+        sync: false
+      - key: TOKEN_ENCRYPTION_KEY
+        sync: false
+      - key: GOOGLE_CLIENT_ID
+        sync: false
+      - key: GOOGLE_CLIENT_SECRET
+        sync: false
+      - key: SLACK_CLIENT_ID
+        sync: false
+      - key: SLACK_CLIENT_SECRET
+        sync: false
+      - key: ETHEREAL_HOST
+        sync: false
+      - key: ETHEREAL_PORT
+        value: "587"
+      - key: ETHEREAL_USER
+        sync: false
+      - key: ETHEREAL_PASS
+        sync: false
+      - key: WORKER_CONCURRENCY
+        value: "5"
+      - key: MIN_SEND_DELAY_MS
+        value: "2000"
+      - key: MAX_EMAILS_PER_HOUR
+        value: "200"
+      - key: QUEUE_DASHBOARD_USER
+        sync: false
+      - key: QUEUE_DASHBOARD_PASSWORD
+        sync: false
