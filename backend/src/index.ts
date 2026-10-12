@@ -64,8 +64,9 @@ app.use(cors({
       "http://127.0.0.1:3002",
     ]);
     const isLocalhost = Boolean(origin && /^(https?:\/\/)(localhost|127\.0\.0\.1)(?::\d+)?$/.test(origin));
+    const isVercel = Boolean(origin && /^https:\/\/[a-z0-9-]+(\.vercel\.app)$/i.test(origin));
     const isConfigured = Boolean(origin && allowedOrigins.has(origin));
-    callback(null, !origin || isLocalhost || isConfigured);
+    callback(null, !origin || isLocalhost || isConfigured || isVercel);
   },
 }));
 app.use(express.json({ limit: "2mb" }));
