@@ -3,10 +3,13 @@
 import {
   AlertCircle,
   ArrowUpRight,
+  BarChart3,
   CalendarDays,
   Check,
   ChevronDown,
   Clock3,
+  Download,
+  Eye,
   FileText,
   Inbox,
   Loader2,
@@ -19,6 +22,7 @@ import {
   Search,
   Settings2,
   Send,
+  Sparkles,
   Trash2,
   Upload,
   X,
@@ -27,6 +31,27 @@ import React, { FormEvent, useEffect, useState } from "react";
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:5000";
 const emailPattern = /\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}\b/gi;
+
+const TEMPLATES = [
+  {
+    id: "intro",
+    name: "Quick Intro & Partnership",
+    subject: "Quick question regarding {{company}} outreach",
+    body: "Hi {{name}},\n\nI came across {{company}} and noticed your team is actively scaling outreach.\n\nWe recently helped teams streamline multi-sender email deliverability with automated pacing and provider throttling.\n\nWould you be open to a 10-minute chat this Thursday to explore if this could help {{company}}?\n\nBest regards,\nReachInbox Team",
+  },
+  {
+    id: "demo",
+    name: "Product Demo Invitation",
+    subject: "Modern email scheduling built for {{company}}",
+    body: "Hey {{name}},\n\nSaw the great work you're doing at {{company}}.\n\nWe built ReachInbox to handle high-volume scheduled outreach without burning sender reputation or getting throttled by SMTP providers.\n\nWould love to give you a quick walkthrough if you have 15 minutes next week.\n\nCheers,\nReachInbox Team",
+  },
+  {
+    id: "followup",
+    name: "Friendly Follow-Up",
+    subject: "Following up on my previous note to {{name}}",
+    body: "Hi {{name}},\n\nJust bumping this in case it got buried under your inbox.\n\nLet me know if exploring automated email scheduling with rate limits is top of mind for {{company}} right now.\n\nHappy to share a quick demo link.\n\nBest,\nReachInbox Team",
+  },
+];
 
 type User = { id: string; name: string | null; email: string; avatarUrl: string | null };
 type EmailJob = {
@@ -137,9 +162,22 @@ export default function Page() {
   const recipients = findEmails(leadText);
   const scheduledCount = emails.filter((email) => ["SCHEDULED", "PENDING", "SENDING"].includes(email.status)).length;
   const sentCount = emails.filter((email) => email.status === "SENT").length;
-  const visibleEmails = (searchResults || emails).filter((email) => selectedView === "scheduled"
-    ? ["SCHEDULED", "PENDING", "SENDING"].includes(email.status)
-    : ["SENT", "FAILED"].includes(email.status));
+  const failedCount = emails.filter((email) => email.status === "FAILED").length;
+  const deliveryRate = sentCount + failedCount > 0 ? Math.round((sentCount / (sentCount + failedCount)) * 100) : 100;
+  const [statusFilter, setStatusFilter] = useState<"ALL" | "SENT" | "FAILED">("ALL");
+  const [retryingAll, setRetryingAll] = useState(false);
+  const [templatePreview, setTemplatePreview] = useState(false);
+  const [selectedTemplate, setSelectedTemplate] = useState("");
+
+  const baseEmails = searchResults || emails;
+  const visibleEmails = baseEmails.filter((email) => {
+    if (selectedView === "scheduled") {
+      return ["SCHEDULED", "PENDING", "SENDING"].includes(email.status);
+    }
+    if (statusFilter === "SENT") return email.status === "SENT";
+    if (statusFilter === "FAILED") return email.status === "FAILED";
+    return ["SENT", "FAILED"].includes(email.status);
+  });
 
   useEffect(() => {
     let active = true;
@@ -341,6 +379,66 @@ export default function Page() {
     }
   };
 
+  const exportToCsv = () => {
+    const listToExport = searchResults || emails;
+    if (!listToExport.length) {
+      setActionError("No emails to export");
+      return;
+    }
+    const headers = ["ID", "Recipient", "Subject", "Status", "ScheduledAt", "SentAt", "ErrorReason"];
+    const rows = listToExport.map((e) => [
+      `"${e.id}"`,
+      `"${e.recipient.replace(/"/g, '""')}"`,
+      `"${(e.subject || "").replace(/"/g, '""')}"`,
+      `"${e.status}"`,
+      `"${e.scheduledAt || ""}"`,
+      `"${e.sentAt || ""}"`,
+      `"${(e.errorReason || "").replace(/"/g, '""')}"`,
+    ]);
+    const csvContent = [headers.join(","), ...rows.map((r) => r.join(","))].join("\n");
+    const blob = new Blob([csvContent], { type: "text/csv;charset=utf-8;" });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.setAttribute("download", `reachinbox-emails-${new Date().toISOString().slice(0, 10)}.csv`);
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    URL.revokeObjectURL(url);
+    setToast("Exported emails to CSV file");
+  };
+
+  const retryAllFailed = async () => {
+    const failedEmails = emails.filter((e) => e.status === "FAILED");
+    if (!failedEmails.length) return;
+    setRetryingAll(true);
+    setActionError("");
+    try {
+      await Promise.allSettled(failedEmails.map((email) => updateJob(email, "retry")));
+      setToast(`Retrying ${failedEmails.length} failed email${failedEmails.length > 1 ? "s" : ""}`);
+      await refreshJobs();
+    } catch {
+      setActionError("Some emails could not be retried");
+    } finally {
+      setRetryingAll(false);
+    }
+  };
+
+  const insertVariable = (tag: string) => {
+    setBody((prev) => (prev ? `${prev} ${tag}` : tag));
+  };
+
+  const renderPreview = (text: string) => {
+    const sampleRecipient = recipients[0] || "alex.morgan@acme.corp";
+    const sampleName = sampleRecipient.split("@")[0].replace(/[._-]/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
+    const domain = sampleRecipient.split("@")[1] || "acme.corp";
+    const company = domain.split(".")[0].toUpperCase();
+    return text
+      .replace(/\{\{name\}\}/gi, sampleName)
+      .replace(/\{\{company\}\}/gi, company)
+      .replace(/\{\{email\}\}/gi, sampleRecipient);
+  };
+
   const disconnectSlack = async () => {
     try {
       await apiRequest<void>("/api/integrations/slack", { method: "DELETE" });
@@ -448,9 +546,61 @@ export default function Page() {
           </div>
         </header>
 
+        <div className="metrics-banner">
+          <div className="metric-card">
+            <span className="metric-icon scheduled"><Clock3 size={15} /></span>
+            <div className="metric-info">
+              <span className="metric-val">{scheduledCount}</span>
+              <span className="metric-label">In Queue</span>
+            </div>
+          </div>
+          <div className="metric-card">
+            <span className="metric-icon sent"><Send size={15} /></span>
+            <div className="metric-info">
+              <span className="metric-val">{sentCount}</span>
+              <span className="metric-label">Delivered</span>
+            </div>
+          </div>
+          <div className="metric-card">
+            <span className="metric-icon failed"><AlertCircle size={15} /></span>
+            <div className="metric-info">
+              <span className="metric-val">{failedCount}</span>
+              <span className="metric-label">Failed</span>
+            </div>
+          </div>
+          <div className="metric-card">
+            <span className="metric-icon rate"><BarChart3 size={15} /></span>
+            <div className="metric-info">
+              <span className="metric-val">{deliveryRate}%</span>
+              <span className="metric-label">Success Rate</span>
+            </div>
+          </div>
+        </div>
+
         <div className="list-toolbar">
-          <div className="list-caption"><span className="caption-icon">{selectedView === "scheduled" ? <Clock3 size={16} /> : <Inbox size={16} />}</span><span>{visibleEmails.length} {selectedView === "scheduled" ? "in your queue" : "messages delivered"}</span></div>
-          <div className="toolbar-right"><span className="live-indicator"><i /> LIVE QUEUE</span><button className="compose-small" onClick={() => setComposeOpen(true)}><Plus size={15} /> New email</button></div>
+          <div className="list-caption">
+            <span className="caption-icon">{selectedView === "scheduled" ? <Clock3 size={16} /> : <Inbox size={16} />}</span>
+            <span>{visibleEmails.length} {selectedView === "scheduled" ? "in your queue" : "messages"}</span>
+            {selectedView === "sent" && (
+              <div className="filter-pills" role="tablist">
+                <button type="button" className={`filter-pill ${statusFilter === "ALL" ? "active" : ""}`} onClick={() => setStatusFilter("ALL")}>All ({sentCount + failedCount})</button>
+                <button type="button" className={`filter-pill ${statusFilter === "SENT" ? "active" : ""}`} onClick={() => setStatusFilter("SENT")}>Delivered ({sentCount})</button>
+                {failedCount > 0 && (
+                  <button type="button" className={`filter-pill failed ${statusFilter === "FAILED" ? "active" : ""}`} onClick={() => setStatusFilter("FAILED")}>Failed ({failedCount})</button>
+                )}
+              </div>
+            )}
+          </div>
+          <div className="toolbar-right">
+            <button className="toolbar-button" onClick={exportToCsv} title="Download CSV report"><Download size={13} /> Export CSV</button>
+            {selectedView === "sent" && failedCount > 0 && (
+              <button className="toolbar-button retry-all" onClick={retryAllFailed} disabled={retryingAll} title="Retry all failed deliveries">
+                <RotateCcw size={13} className={retryingAll ? "spin" : ""} /> {retryingAll ? "Retrying..." : `Retry ${failedCount} Failed`}
+              </button>
+            )}
+            <span className="live-indicator"><i /> LIVE QUEUE</span>
+            <button className="compose-small" onClick={() => setComposeOpen(true)}><Plus size={15} /> New email</button>
+          </div>
         </div>
 
         {actionError && <div className="error-banner" role="alert"><AlertCircle size={16} /><span>{actionError}</span><button onClick={() => setActionError("")} aria-label="Dismiss"><X size={15} /></button></div>}
@@ -488,8 +638,60 @@ export default function Page() {
             <div className="compose-fields">
               <label className="compose-field"><span>From</span><select value={senderId} onChange={(event) => setSenderId(event.target.value)}><option value="">Default Ethereal sender</option>{senders.map((sender) => <option key={sender.id} value={sender.id}>{sender.email}</option>)}</select></label>
               <div className="compose-field recipient-field"><span>To</span><div className="recipient-controls"><textarea value={leadText} onChange={(event) => { setLeadText(event.target.value); setFileName(""); }} placeholder="Paste email addresses or upload a lead file" rows={3} aria-label="Lead email addresses"/><label className="upload-button"><Upload size={15} /> Upload list<input type="file" accept=".csv,.txt,text/csv,text/plain" onChange={(event) => void uploadLeads(event.target.files?.[0])} /></label></div><div className="lead-count"><span>{recipients.length} valid {recipients.length === 1 ? "address" : "addresses"} found</span>{fileName && <span className="file-name"><FileText size={13} /> {fileName}</span>}</div></div>
-              <label className="compose-field"><span>Subject</span><input required maxLength={998} value={subject} onChange={(event) => setSubject(event.target.value)} placeholder="A clear, relevant subject" /></label>
-              <label className="compose-field body-field"><span>Message</span><textarea required maxLength={100000} value={body} onChange={(event) => setBody(event.target.value)} placeholder="Write a thoughtful note..." rows={6} /></label>
+              
+              <div className="template-bar">
+                <div className="template-left">
+                  <Sparkles size={14} className="sparkle-icon" />
+                  <span className="template-label">Template:</span>
+                  <select
+                    className="template-select"
+                    value={selectedTemplate}
+                    onChange={(e) => {
+                      const t = TEMPLATES.find((tpl) => tpl.id === e.target.value);
+                      if (t) {
+                        setSubject(t.subject);
+                        setBody(t.body);
+                        setSelectedTemplate(t.id);
+                        setTemplatePreview(false);
+                      }
+                    }}
+                  >
+                    <option value="">Load an outreach template...</option>
+                    {TEMPLATES.map((tpl) => (
+                      <option key={tpl.id} value={tpl.id}>{tpl.name}</option>
+                    ))}
+                  </select>
+                </div>
+                <div className="variable-chips">
+                  <span className="chips-label">Merge tags:</span>
+                  <button type="button" className="chip" onClick={() => insertVariable("{{name}}")}>+ {"{{name}}"}</button>
+                  <button type="button" className="chip" onClick={() => insertVariable("{{company}}")}>+ {"{{company}}"}</button>
+                  <button type="button" className="chip" onClick={() => insertVariable("{{email}}")}>+ {"{{email}}"}</button>
+                  <button type="button" className={`chip preview-toggle ${templatePreview ? "active" : ""}`} onClick={() => setTemplatePreview(!templatePreview)}>
+                    <Eye size={12} /> {templatePreview ? "Editor" : "Preview"}
+                  </button>
+                </div>
+              </div>
+
+              {templatePreview ? (
+                <div className="preview-container">
+                  <div className="preview-header">
+                    <Sparkles size={13} />
+                    <span>SAMPLE PERSONALIZED PREVIEW ({recipients[0] || "alex.morgan@acme.corp"})</span>
+                  </div>
+                  <div className="preview-subject">
+                    <span className="preview-label">Subject:</span> {renderPreview(subject || "(No subject)")}
+                  </div>
+                  <div className="preview-body">
+                    {renderPreview(body || "(No message body written yet)")}
+                  </div>
+                </div>
+              ) : (
+                <>
+                  <label className="compose-field"><span>Subject</span><input required maxLength={998} value={subject} onChange={(event) => setSubject(event.target.value)} placeholder="A clear, relevant subject" /></label>
+                  <label className="compose-field body-field"><span>Message</span><textarea required maxLength={100000} value={body} onChange={(event) => setBody(event.target.value)} placeholder="Write a thoughtful note..." rows={6} /></label>
+                </>
+              )}
             </div>
             <div className="schedule-settings"><div className="settings-heading"><span>DELIVERY SETTINGS</span><span>APPLIED PER EMAIL</span></div><div className="settings-grid">
               <label className="setting-input"><span><CalendarDays size={14} /> Start time</span><input type="datetime-local" value={startAt} onChange={(event) => setStartAt(event.target.value)} /></label>
@@ -571,6 +773,43 @@ const styles = `
   .icon-button:hover { color: #315f43; border-color: #bfd3c4; }
   .user-avatar-button { display: grid; width: 34px; height: 34px; place-items: center; overflow: hidden; border: 0; border-radius: 50%; background: #c28b5e; color: white; font-size: 11px; font-weight: 700; cursor: pointer; }
   .user-avatar-button img { width: 100%; height: 100%; object-fit: cover; }
+  .metrics-banner { display: grid; grid-template-columns: repeat(auto-fit, minmax(130px, 1fr)); gap: 11px; padding: 16px clamp(22px, 4vw, 62px) 14px; border-bottom: 1px solid var(--line); background: #fbfcf9; }
+  .metric-card { display: flex; align-items: center; gap: 11px; padding: 10px 13px; border: 1px solid #e5eae3; border-radius: 8px; background: white; transition: border-color .15s ease, transform .15s ease; }
+  .metric-card:hover { border-color: #cbd8ca; transform: translateY(-1px); }
+  .metric-icon { display: grid; width: 32px; height: 32px; flex: 0 0 32px; place-items: center; border-radius: 6px; }
+  .metric-icon.scheduled { background: #f1f4ef; color: #44684f; }
+  .metric-icon.sent { background: #e8f3ec; color: #2e6945; }
+  .metric-icon.failed { background: #faedea; color: #a44d41; }
+  .metric-icon.rate { background: #edf4fb; color: #326496; }
+  .metric-info { display: grid; gap: 1px; }
+  .metric-val { color: #242e27; font-size: 16px; font-weight: 750; line-height: 1.1; }
+  .metric-label { color: #879188; font-size: 9px; font-weight: 650; letter-spacing: .4px; text-transform: uppercase; }
+  .filter-pills { display: inline-flex; gap: 4px; margin-left: 8px; background: #ebf0ea; padding: 3px; border-radius: 6px; }
+  .filter-pill { padding: 3px 8px; border: 0; border-radius: 4px; background: transparent; color: #626d64; font-size: 10px; font-weight: 600; cursor: pointer; transition: background .12s ease; }
+  .filter-pill:hover { color: #233128; }
+  .filter-pill.active { background: white; color: #245738; font-weight: 700; box-shadow: 0 1px 3px rgba(0,0,0,.06); }
+  .filter-pill.failed.active { color: #9d4237; }
+  .toolbar-button { display: inline-flex; align-items: center; gap: 6px; padding: 6px 11px; border: 1px solid #dce2da; border-radius: 5px; background: white; color: #4e5b51; font-size: 11px; font-weight: 600; cursor: pointer; transition: all .14s ease; }
+  .toolbar-button:hover { background: #f4f7f2; border-color: #c4d1c2; color: #233829; }
+  .toolbar-button.retry-all { color: #a3483c; border-color: #f1c9c3; background: #fff8f7; }
+  .toolbar-button.retry-all:hover { background: #feebe8; }
+  .template-bar { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 10px; padding: 10px 12px; margin-top: 6px; border: 1px solid #dce4dc; border-radius: 6px; background: #f7faf7; }
+  .template-left { display: flex; align-items: center; gap: 7px; color: #435b49; font-size: 11px; font-weight: 650; }
+  .sparkle-icon { color: #3d7955; }
+  .template-label { font-size: 11px; font-weight: 700; color: #37463b; }
+  .template-select { height: 30px; padding: 0 9px; border: 1px solid #cbd6cb; border-radius: 4px; background: white; color: #2e3b31; font-size: 11px; cursor: pointer; }
+  .variable-chips { display: flex; align-items: center; flex-wrap: wrap; gap: 5px; }
+  .chips-label { color: #7f8a80; font-size: 10px; font-weight: 600; }
+  .chip { padding: 3px 8px; border: 1px solid #ccd8cc; border-radius: 4px; background: white; color: #31583d; font-size: 10px; font-weight: 650; cursor: pointer; transition: all .12s ease; }
+  .chip:hover { background: #e8f2e9; border-color: #a8caa9; }
+  .chip.preview-toggle { display: inline-flex; align-items: center; gap: 4px; background: #2f5f40; color: white; border-color: #275236; }
+  .chip.preview-toggle:hover { background: #244b32; }
+  .chip.preview-toggle.active { background: #c27c44; border-color: #a86532; }
+  .preview-container { margin-top: 6px; padding: 14px; border: 1px solid #cad8cb; border-radius: 6px; background: #fafcfa; font-size: 12px; }
+  .preview-header { display: flex; align-items: center; gap: 6px; margin-bottom: 10px; color: #3b6b4a; font-size: 10px; font-weight: 750; letter-spacing: .5px; }
+  .preview-subject { padding: 9px 12px; border-bottom: 1px dashed #d5ded5; color: #27332a; font-weight: 600; margin-bottom: 10px; }
+  .preview-label { color: #7b887d; font-weight: 550; margin-right: 5px; }
+  .preview-body { color: #334036; line-height: 1.6; white-space: pre-wrap; padding: 4px 12px; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }
   .list-toolbar { display: flex; min-height: 62px; align-items: center; justify-content: space-between; gap: 14px; padding: 0 clamp(22px, 4vw, 62px); border-bottom: 1px solid var(--line); }
   .list-caption, .toolbar-right { display: flex; align-items: center; gap: 10px; color: #788078; font-size: 11px; }
   .caption-icon { display: grid; width: 26px; height: 26px; place-items: center; border-radius: 6px; background: #eef2ec; color: #56725e; }
