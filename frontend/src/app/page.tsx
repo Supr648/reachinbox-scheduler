@@ -373,19 +373,23 @@ export default function Page() {
             <h1>Thoughtful follow-ups, right on time.</h1>
             <p>Schedule, track, and deliver email sequences from one focused workspace.</p>
           </div>
-          {googleEnabled ? (
+          {googleEnabled && (
             <a className="google-button" href={`${API_URL}/api/auth/google`}>
               <span className="google-g">G</span>
               Continue with Google
               <ArrowUpRight size={16} />
             </a>
-          ) : (
-            <button className="google-button demo-login-button" onClick={enterDemoWorkspace} disabled={loginBusy}>
-              {loginBusy ? <Loader2 className="spin" size={16} /> : <Mail size={16} />}
-              {loginBusy ? "Opening workspace..." : "Enter demo workspace"}
-              <ArrowUpRight size={16} />
-            </button>
           )}
+          <button
+            className="google-button demo-login-button"
+            onClick={enterDemoWorkspace}
+            disabled={loginBusy}
+            style={googleEnabled ? { marginTop: "10px", background: "#f8fafc", color: "#334155", border: "1px solid #cbd5e1" } : undefined}
+          >
+            {loginBusy ? <Loader2 className="spin" size={16} /> : <Mail size={16} />}
+            {loginBusy ? "Opening workspace..." : "Sign in as Demo User"}
+            <ArrowUpRight size={16} />
+          </button>
           {loginError && <p className="login-error" role="alert">{loginError}</p>}
           <div className="login-foot"><span>Secure workspace</span><span>OAuth protected</span></div>
         </section>
