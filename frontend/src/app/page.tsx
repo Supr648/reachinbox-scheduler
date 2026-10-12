@@ -16,6 +16,7 @@ import {
   LogOut,
   Mail,
   Menu,
+  Moon,
   Plus,
   RefreshCw,
   RotateCcw,
@@ -23,11 +24,15 @@ import {
   Settings2,
   Send,
   Sparkles,
+  Split,
+  Sun,
+  Table,
   Trash2,
   Upload,
+  UserCheck,
   X,
 } from "lucide-react";
-import React, { FormEvent, useEffect, useState } from "react";
+import React, { FormEvent, useEffect, useMemo, useState } from "react";
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:5000";
 const emailPattern = /\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}\b/gi;
@@ -102,6 +107,65 @@ function findEmails(text: string) {
   return Array.from(new Set((text.match(emailPattern) || []).map((email) => email.toLowerCase())));
 }
 
+type ParsedLead = {
+  email: string;
+  name?: string;
+  company?: string;
+  role?: string;
+};
+
+function parseLeadCsv(text: string): ParsedLead[] {
+  const lines = text.split(/\r?\n/).map((l) => l.trim()).filter(Boolean);
+  if (!lines.length) return [];
+  const separator = lines[0].includes("\t") ? "\t" : lines[0].includes(";") ? ";" : ",";
+  const headerTokens = lines[0].split(separator).map((h) => h.trim().replace(/^["']|["']$/g, "").toLowerCase());
+  const hasHeader = headerTokens.some((h) =>
+    ["email", "mail", "recipient", "name", "first name", "company", "organization"].includes(h)
+  );
+
+  if (!hasHeader) {
+    const rawEmails = findEmails(text);
+    return rawEmails.map((email) => {
+      const emailUser = email.split("@")[0] || "";
+      const emailDomain = email.split("@")[1] || "";
+      return {
+        email,
+        name: emailUser.replace(/[._-]/g, " ").replace(/\b\w/g, (c) => c.toUpperCase()),
+        company: emailDomain.split(".")[0]?.toUpperCase() || "",
+      };
+    });
+  }
+
+  const emailColIdx = headerTokens.findIndex((h) => ["email", "mail", "recipient", "e-mail"].includes(h));
+  const nameColIdx = headerTokens.findIndex((h) => ["name", "first name", "firstname", "full name", "contact"].includes(h));
+  const companyColIdx = headerTokens.findIndex((h) => ["company", "company name", "organization", "account"].includes(h));
+  const roleColIdx = headerTokens.findIndex((h) => ["role", "title", "job title", "position"].includes(h));
+
+  const results: ParsedLead[] = [];
+  const seenEmails = new Set<string>();
+
+  for (let i = 1; i < lines.length; i++) {
+    const rawCols = lines[i].split(separator).map((c) => c.trim().replace(/^["']|["']$/g, ""));
+    const emailCandidate = (emailColIdx >= 0 ? rawCols[emailColIdx] : rawCols.find((c) => emailPattern.test(c)))?.toLowerCase();
+    if (!emailCandidate || !emailCandidate.includes("@") || seenEmails.has(emailCandidate)) continue;
+    seenEmails.add(emailCandidate);
+
+    const emailUser = emailCandidate.split("@")[0] || "";
+    const emailDomain = emailCandidate.split("@")[1] || "";
+    const defaultName = emailUser.replace(/[._-]/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
+    const defaultCompany = emailDomain.split(".")[0]?.toUpperCase() || "";
+
+    results.push({
+      email: emailCandidate,
+      name: nameColIdx >= 0 && rawCols[nameColIdx] ? rawCols[nameColIdx] : defaultName,
+      company: companyColIdx >= 0 && rawCols[companyColIdx] ? rawCols[companyColIdx] : defaultCompany,
+      ...(roleColIdx >= 0 && rawCols[roleColIdx] ? { role: rawCols[roleColIdx] } : {}),
+    });
+  }
+
+  return results;
+}
+
 function localDateTimeValue(date: Date) {
   return new Date(date.getTime() - date.getTimezoneOffset() * 60000).toISOString().slice(0, 16);
 }
@@ -159,7 +223,24 @@ export default function Page() {
   const [senderDelay, setSenderDelay] = useState("2000");
   const [savingSender, setSavingSender] = useState(false);
 
-  const recipients = findEmails(leadText);
+  const [theme, setTheme] = useState<"light" | "dark">("light");
+  const [abTestEnabled, setAbTestEnabled] = useState(false);
+  const [subjectB, setSubjectB] = useState("");
+  const [syncInterval, setSyncInterval] = useState<number | null>(10);
+  const [secondsUntilSync, setSecondsUntilSync] = useState(10);
+  const [showLeadTable, setShowLeadTable] = useState(false);
+
+  const parsedLeads = useMemo(() => parseLeadCsv(leadText), [leadText]);
+  const recipients = useMemo(() => parsedLeads.map((l) => l.email), [parsedLeads]);
+
+  const toggleTheme = () => {
+    const next = theme === "light" ? "dark" : "light";
+    setTheme(next);
+    if (typeof window !== "undefined") {
+      localStorage.setItem("reachinbox_theme", next);
+    }
+  };
+
   const scheduledCount = emails.filter((email) => ["SCHEDULED", "PENDING", "SENDING"].includes(email.status)).length;
   const sentCount = emails.filter((email) => email.status === "SENT").length;
   const failedCount = emails.filter((email) => email.status === "FAILED").length;
@@ -239,14 +320,21 @@ export default function Page() {
   }, [user]);
 
   useEffect(() => {
-    if (!user) return;
-    const timer = window.setInterval(() => {
-      apiRequest<{ emails: EmailJob[] }>("/api/jobs?take=200")
-        .then((result) => setEmails(result.emails))
-        .catch(() => undefined);
-    }, 10000);
-    return () => window.clearInterval(timer);
-  }, [user]);
+    if (!user || syncInterval === null) return;
+    setSecondsUntilSync(syncInterval);
+    const ticker = window.setInterval(() => {
+      setSecondsUntilSync((prev) => {
+        if (prev <= 1) {
+          apiRequest<{ emails: EmailJob[] }>("/api/jobs?take=200")
+            .then((result) => setEmails(result.emails))
+            .catch(() => undefined);
+          return syncInterval;
+        }
+        return prev - 1;
+      });
+    }, 1000);
+    return () => window.clearInterval(ticker);
+  }, [user, syncInterval]);
 
   useEffect(() => {
     const query = search.trim();
@@ -264,6 +352,8 @@ export default function Page() {
 
   useEffect(() => {
     if (typeof window === "undefined") return;
+    const saved = localStorage.getItem("reachinbox_theme");
+    if (saved === "dark" || saved === "light") setTheme(saved);
     const params = new URLSearchParams(window.location.search);
     if (params.get("auth") === "failed") setActionError("Google sign-in could not be completed. Check the OAuth configuration and try again.");
     if (params.get("slack") === "connected") setToast("Slack connected. Rate-limit alerts will be sent by DM.");
@@ -320,6 +410,15 @@ export default function Page() {
     try {
       const headers = new Headers();
       headers.set("Idempotency-Key", crypto.randomUUID());
+
+      const personalizedMap: Record<string, { name?: string; company?: string }> = {};
+      parsedLeads.forEach((lead) => {
+        personalizedMap[lead.email] = {
+          name: lead.name,
+          company: lead.company,
+        };
+      });
+
       const result = await apiRequest<{ count: number }>("/api/schedule-email", {
         method: "POST",
         headers,
@@ -327,6 +426,8 @@ export default function Page() {
           recipients,
           subject,
           body,
+          subjectB: abTestEnabled && subjectB.trim() ? subjectB.trim() : undefined,
+          personalized: personalizedMap,
           startAt: new Date(startAt).toISOString(),
           delayBetweenEmailsSeconds: Number(sendDelay),
           hourlyLimit: hourlyLimit ? Number(hourlyLimit) : undefined,
@@ -338,7 +439,10 @@ export default function Page() {
       setLeadText("");
       setFileName("");
       setSubject("");
+      setSubjectB("");
       setBody("");
+      setAbTestEnabled(false);
+      setShowLeadTable(false);
       await refreshJobs();
     } catch (error) {
       setActionError(error instanceof Error ? error.message : "Scheduling failed");
@@ -454,13 +558,14 @@ export default function Page() {
   };
 
   const renderPreview = (text: string) => {
-    const sampleRecipient = recipients[0] || "alex.morgan@acme.corp";
-    const sampleName = sampleRecipient.split("@")[0].replace(/[._-]/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
+    const sample = parsedLeads[0];
+    const sampleRecipient = sample?.email || "alex.morgan@acme.corp";
+    const sampleName = sample?.name || sampleRecipient.split("@")[0].replace(/[._-]/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
     const domain = sampleRecipient.split("@")[1] || "acme.corp";
-    const company = domain.split(".")[0].toUpperCase();
+    const sampleCompany = sample?.company || domain.split(".")[0].toUpperCase();
     return text
       .replace(/\{\{name\}\}/gi, sampleName)
-      .replace(/\{\{company\}\}/gi, company)
+      .replace(/\{\{company\}\}/gi, sampleCompany)
       .replace(/\{\{email\}\}/gi, sampleRecipient);
   };
 
@@ -528,7 +633,7 @@ export default function Page() {
   }
 
   return (
-    <main className="workspace">
+    <main className={`workspace ${theme === "dark" ? "dark-theme" : ""}`}>
       <aside className="sidebar">
         <a className="brand" href="#top"><span className="brand-mark"><Mail size={18} /></span><span>reachinbox</span></a>
         <div className="account-card">
@@ -566,6 +671,7 @@ export default function Page() {
           <div className="topbar-actions">
             <label className="search-box"><Search size={17} /><input aria-label="Search emails" placeholder="Search emails" value={search} onChange={(event) => setSearch(event.target.value)} />{search && <button aria-label="Clear search" onClick={() => setSearch("")}><X size={14} /></button>}</label>
             <button className="icon-button" title="Refresh emails" aria-label="Refresh emails" onClick={refreshJobs}><RefreshCw size={17} className={loadingJobs ? "spin" : ""} /></button>
+            <button className="icon-button" title={`Switch to ${theme === "light" ? "dark" : "light"} mode`} aria-label="Toggle theme" onClick={toggleTheme}>{theme === "light" ? <Moon size={16} /> : <Sun size={16} />}</button>
             {/* eslint-disable-next-line @next/next/no-img-element */}
             <button className="user-avatar-button" title="Sign out" onClick={logout}>{user.avatarUrl ? <img src={user.avatarUrl} alt="" /> : initials(user.name, user.email)}</button>
           </div>
@@ -638,6 +744,17 @@ export default function Page() {
                 <RotateCcw size={13} className={retryingAll ? "spin" : ""} /> {retryingAll ? "Retrying..." : `Retry ${failedCount} Failed`}
               </button>
             )}
+            <button
+              type="button"
+              className="sync-pill"
+              title="Click to toggle auto-refresh speed (10s -> 5s -> 30s -> Pause)"
+              onClick={() => {
+                setSyncInterval((prev) => (prev === 10 ? 5 : prev === 5 ? 30 : prev === 30 ? null : 10));
+              }}
+            >
+              <span className={`sync-dot ${syncInterval ? "active" : "paused"}`} />
+              <span>{syncInterval ? `Sync: ${secondsUntilSync}s` : "Sync: Paused"}</span>
+            </button>
             <span className="live-indicator"><i /> LIVE QUEUE</span>
             <button className="compose-small" onClick={() => setComposeOpen(true)}><Plus size={15} /> New email</button>
           </div>
@@ -683,7 +800,53 @@ export default function Page() {
           <form onSubmit={scheduleEmails}>
             <div className="compose-fields">
               <label className="compose-field"><span>From</span><select value={senderId} onChange={(event) => setSenderId(event.target.value)}><option value="">Default Ethereal sender</option>{senders.map((sender) => <option key={sender.id} value={sender.id}>{sender.email}</option>)}</select></label>
-              <div className="compose-field recipient-field"><span>To</span><div className="recipient-controls"><textarea value={leadText} onChange={(event) => { setLeadText(event.target.value); setFileName(""); }} placeholder="Paste email addresses or upload a lead file" rows={3} aria-label="Lead email addresses"/><label className="upload-button"><Upload size={15} /> Upload list<input type="file" accept=".csv,.txt,text/csv,text/plain" onChange={(event) => void uploadLeads(event.target.files?.[0])} /></label></div><div className="lead-count"><span>{recipients.length} valid {recipients.length === 1 ? "address" : "addresses"} found</span>{fileName && <span className="file-name"><FileText size={13} /> {fileName}</span>}</div></div>
+              <div className="compose-field recipient-field">
+                <span>To</span>
+                <div className="recipient-controls">
+                  <textarea value={leadText} onChange={(event) => { setLeadText(event.target.value); setFileName(""); }} placeholder="Paste email addresses or upload a lead file" rows={3} aria-label="Lead email addresses"/>
+                  <label className="upload-button"><Upload size={15} /> Upload list<input type="file" accept=".csv,.txt,text/csv,text/plain" onChange={(event) => void uploadLeads(event.target.files?.[0])} /></label>
+                </div>
+                <div className="lead-count">
+                  <span>{recipients.length} valid {recipients.length === 1 ? "address" : "addresses"} found</span>
+                  {fileName && <span className="file-name"><FileText size={13} /> {fileName}</span>}
+                </div>
+                {parsedLeads.length > 0 && (
+                  <div className="lead-preview-strip">
+                    <div className="lead-strip-summary">
+                      <UserCheck size={13} className="lead-check-icon" />
+                      <span>{parsedLeads.length} leads loaded · Auto-injecting <code>{"{{name}}"}</code> &amp; <code>{"{{company}}"}</code></span>
+                    </div>
+                    <button type="button" className="lead-strip-toggle" onClick={() => setShowLeadTable(!showLeadTable)}>
+                      <Table size={12} /> {showLeadTable ? "Hide Lead Table" : "View Data Table"}
+                    </button>
+                  </div>
+                )}
+                {showLeadTable && parsedLeads.length > 0 && (
+                  <div className="lead-data-drawer">
+                    <table className="lead-mini-table">
+                      <thead>
+                        <tr>
+                          <th>Email</th>
+                          <th>Name (&#123;&#123;name&#125;&#125;)</th>
+                          <th>Company (&#123;&#123;company&#125;&#125;)</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {parsedLeads.slice(0, 5).map((l, i) => (
+                          <tr key={i}>
+                            <td className="lead-email-cell">{l.email}</td>
+                            <td>{l.name || "—"}</td>
+                            <td>{l.company || "—"}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                    {parsedLeads.length > 5 && (
+                      <div className="lead-more-note">+ {parsedLeads.length - 5} more leads will be personalized</div>
+                    )}
+                  </div>
+                )}
+              </div>
               
               <div className="template-bar">
                 <div className="template-left">
@@ -719,6 +882,19 @@ export default function Page() {
                 </div>
               </div>
 
+              <div className="ab-split-bar">
+                <button
+                  type="button"
+                  className={`ab-split-button ${abTestEnabled ? "active" : ""}`}
+                  onClick={() => setAbTestEnabled(!abTestEnabled)}
+                >
+                  <Split size={13} /> {abTestEnabled ? "Disable A/B Split Test" : "+ A/B Test Subject Line (50/50 Split)"}
+                </button>
+                {abTestEnabled && (
+                  <span className="ab-split-badge">50% Traffic Split across Leads</span>
+                )}
+              </div>
+
               {templatePreview ? (
                 <div className="preview-container">
                   <div className="preview-header">
@@ -734,7 +910,32 @@ export default function Page() {
                 </div>
               ) : (
                 <>
-                  <label className="compose-field"><span>Subject</span><input required maxLength={998} value={subject} onChange={(event) => setSubject(event.target.value)} placeholder="A clear, relevant subject" /></label>
+                  {abTestEnabled ? (
+                    <div className="ab-subject-grid">
+                      <label className="compose-field">
+                        <span>Subject [A]</span>
+                        <input
+                          required
+                          maxLength={998}
+                          value={subject}
+                          onChange={(event) => setSubject(event.target.value)}
+                          placeholder="Variant A subject line (50% traffic)"
+                        />
+                      </label>
+                      <label className="compose-field">
+                        <span>Subject [B]</span>
+                        <input
+                          required
+                          maxLength={998}
+                          value={subjectB}
+                          onChange={(event) => setSubjectB(event.target.value)}
+                          placeholder="Variant B subject line (50% traffic)"
+                        />
+                      </label>
+                    </div>
+                  ) : (
+                    <label className="compose-field"><span>Subject</span><input required maxLength={998} value={subject} onChange={(event) => setSubject(event.target.value)} placeholder="A clear, relevant subject" /></label>
+                  )}
                   <label className="compose-field body-field"><span>Message</span><textarea required maxLength={100000} value={body} onChange={(event) => setBody(event.target.value)} placeholder="Write a thoughtful note..." rows={6} /></label>
                 </>
               )}
@@ -1172,5 +1373,137 @@ const styles = `
     .art-note strong { font-size: 44px; }
     .art-footer { right: 18px; bottom: 16px; font-size: 7px; }
   }
+  /* Sync pill */
+  .sync-pill { display: inline-flex; align-items: center; gap: 6px; padding: 4px 9px; border: 1px solid #dbe2da; border-radius: 12px; background: white; color: #4b584e; font-size: 10px; font-weight: 650; cursor: pointer; transition: all .14s ease; }
+  .sync-pill:hover { background: #f0f4ef; border-color: #bcd0be; color: #233b28; }
+  .sync-dot { width: 6px; height: 6px; border-radius: 50%; }
+  .sync-dot.active { background: #3d8c58; box-shadow: 0 0 0 2px #d2ebd8; }
+  .sync-dot.paused { background: #c28854; box-shadow: 0 0 0 2px #faeada; }
+
+  /* Lead data drawer and table */
+  .lead-preview-strip { grid-column: 2; display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-top: 7px; padding: 6px 10px; border: 1px solid #d5e0d4; border-radius: 5px; background: #f4f8f4; font-size: 10px; color: #3b5742; }
+  .lead-strip-summary { display: flex; align-items: center; gap: 6px; }
+  .lead-check-icon { color: #38734e; }
+  .lead-strip-summary code { background: #e3ede3; padding: 1px 4px; border-radius: 3px; font-family: monospace; font-size: 9px; }
+  .lead-strip-toggle { display: inline-flex; align-items: center; gap: 4px; border: 0; background: none; color: #2e6241; font-weight: 700; cursor: pointer; text-decoration: underline; font-size: 10px; }
+  .lead-data-drawer { grid-column: 2; margin-top: 6px; border: 1px solid #d5e0d4; border-radius: 5px; overflow: hidden; background: white; font-size: 11px; }
+  .lead-mini-table { width: 100%; border-collapse: collapse; text-align: left; }
+  .lead-mini-table th { background: #edf3ec; padding: 6px 10px; font-size: 9px; font-weight: 700; color: #526656; letter-spacing: .4px; border-bottom: 1px solid #dce4da; }
+  .lead-mini-table td { padding: 6px 10px; border-bottom: 1px solid #f0f4ee; color: #3a473d; font-size: 10px; }
+  .lead-email-cell { font-family: monospace; font-size: 10px; color: #2e593e; font-weight: 600; }
+  .lead-more-note { padding: 5px 10px; font-size: 9px; color: #78897c; font-style: italic; background: #fafbfa; }
+
+  /* A/B Testing */
+  .ab-split-bar { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 8px 12px; margin-top: 6px; border: 1px dashed #cedacf; border-radius: 6px; background: #fafcfa; }
+  .ab-split-button { display: inline-flex; align-items: center; gap: 6px; border: 1px solid #ccd8cc; border-radius: 4px; background: white; color: #395743; font-size: 11px; font-weight: 650; padding: 4px 9px; cursor: pointer; transition: all .12s ease; }
+  .ab-split-button:hover { background: #e9f2ea; border-color: #a4cca6; }
+  .ab-split-button.active { background: #2f5f40; color: white; border-color: #244b32; }
+  .ab-split-badge { font-size: 10px; font-weight: 700; color: #316443; background: #e2f0e4; padding: 2px 7px; border-radius: 10px; }
+  .ab-subject-grid { display: grid; gap: 6px; }
+
+  /* Dark Theme System */
+  .workspace.dark-theme, .workspace.dark-theme .main-column { background: #080c14 !important; color: #f1f5f9 !important; }
+  .workspace.dark-theme .sidebar { background: #0c121d !important; border-color: #1e293b !important; }
+  .workspace.dark-theme .brand { color: #f8fafc !important; }
+  .workspace.dark-theme .brand-mark { background: #166534 !important; }
+  .workspace.dark-theme .account-card { background: rgba(15, 23, 42, 0.65) !important; border-color: #1e293b !important; }
+  .workspace.dark-theme .account-text strong { color: #f8fafc !important; }
+  .workspace.dark-theme .account-text span { color: #94a3b8 !important; }
+  .workspace.dark-theme .nav-link, .workspace.dark-theme .tool-link { color: #94a3b8 !important; }
+  .workspace.dark-theme .nav-link:hover, .workspace.dark-theme .tool-link:hover { background: #131c2d !important; color: #f8fafc !important; }
+  .workspace.dark-theme .nav-link.active { background: #14281e !important; color: #4ade80 !important; }
+  .workspace.dark-theme .nav-link.active .nav-count { background: #16402a !important; color: #86efac !important; }
+  .workspace.dark-theme .sidebar-tools { border-color: #1e293b !important; }
+  .workspace.dark-theme .topbar { background: #080c14 !important; border-color: #1e293b !important; }
+  .workspace.dark-theme .topbar h1 { color: #f8fafc !important; }
+  .workspace.dark-theme .search-box { background: #0f172a !important; border-color: #1e293b !important; color: #94a3b8 !important; }
+  .workspace.dark-theme .search-box input { color: #f8fafc !important; }
+  .workspace.dark-theme .search-box input::placeholder { color: #64748b !important; }
+  .workspace.dark-theme .icon-button { background: #0f172a !important; border-color: #1e293b !important; color: #94a3b8 !important; }
+  .workspace.dark-theme .icon-button:hover { background: #172439 !important; color: #4ade80 !important; border-color: #334155 !important; }
+  .workspace.dark-theme .metrics-banner { background: #080c14 !important; border-color: #1e293b !important; }
+  .workspace.dark-theme .metric-card { background: #0f172a !important; border-color: #1e293b !important; }
+  .workspace.dark-theme .metric-card:hover { border-color: #334155 !important; }
+  .workspace.dark-theme .metric-val { color: #f8fafc !important; }
+  .workspace.dark-theme .metric-icon.scheduled { background: #172236 !important; color: #60a5fa !important; }
+  .workspace.dark-theme .metric-icon.sent { background: #14281e !important; color: #4ade80 !important; }
+  .workspace.dark-theme .metric-icon.failed { background: #2f1719 !important; color: #f87171 !important; }
+  .workspace.dark-theme .metric-icon.rate { background: #1e1e38 !important; color: #a78bfa !important; }
+  .workspace.dark-theme .list-toolbar { border-color: #1e293b !important; }
+  .workspace.dark-theme .list-caption { color: #94a3b8 !important; }
+  .workspace.dark-theme .caption-icon { background: #131c2d !important; color: #60a5fa !important; }
+  .workspace.dark-theme .filter-pills { background: #0f172a !important; }
+  .workspace.dark-theme .filter-pill { color: #94a3b8 !important; }
+  .workspace.dark-theme .filter-pill:hover { color: #f8fafc !important; }
+  .workspace.dark-theme .filter-pill.active { background: #1e293b !important; color: #4ade80 !important; }
+  .workspace.dark-theme .filter-pill.failed.active { color: #f87171 !important; }
+  .workspace.dark-theme .toolbar-button { background: #0f172a !important; border-color: #1e293b !important; color: #cbd5e1 !important; }
+  .workspace.dark-theme .toolbar-button:hover { background: #1e293b !important; border-color: #334155 !important; color: #f8fafc !important; }
+  .workspace.dark-theme .sync-pill { background: #0f172a !important; border-color: #1e293b !important; color: #94a3b8 !important; }
+  .workspace.dark-theme .sync-pill:hover { background: #1e293b !important; color: #f8fafc !important; }
+  .workspace.dark-theme .email-row { border-color: #162032 !important; }
+  .workspace.dark-theme .clickable-row:hover { background: #0e1626 !important; }
+  .workspace.dark-theme .recipient-mark { background: #131f31 !important; color: #93c5fd !important; }
+  .workspace.dark-theme .email-address { color: #f8fafc !important; }
+  .workspace.dark-theme .email-subject { color: #cbd5e1 !important; }
+  .workspace.dark-theme .email-preview { color: #64748b !important; }
+  .workspace.dark-theme .email-meta time { color: #64748b !important; }
+  .workspace.dark-theme .row-action button { background: #0f172a !important; border-color: #1e293b !important; color: #94a3b8 !important; }
+  .workspace.dark-theme .row-action a { background: #0f172a !important; border-color: #1e293b !important; color: #94a3b8 !important; }
+  .workspace.dark-theme .list-footer { border-color: #1e293b !important; color: #64748b !important; }
+  .dark-theme .toolbar-button:hover { background: #1e293b; border-color: #334155; color: #f8fafc; }
+  .dark-theme .sync-pill { background: #0f172a; border-color: #1e293b; color: #94a3b8; }
+  .dark-theme .sync-pill:hover { background: #1e293b; color: #f8fafc; }
+  .dark-theme .email-row { border-color: #162032; }
+  .dark-theme .clickable-row:hover { background: #0e1626; }
+  .dark-theme .recipient-mark { background: #131f31; color: #93c5fd; }
+  .dark-theme .email-address { color: #f8fafc; }
+  .dark-theme .email-subject { color: #cbd5e1; }
+  .dark-theme .email-preview { color: #64748b; }
+  .dark-theme .email-meta time { color: #64748b; }
+  .dark-theme .row-action button { background: #0f172a; border-color: #1e293b; color: #94a3b8; }
+  .dark-theme .row-action a { background: #0f172a; border-color: #1e293b; color: #94a3b8; }
+  .dark-theme .list-footer { border-color: #1e293b; color: #64748b; }
+  .dark-theme .compose-modal, .dark-theme .sender-modal { background: #0c121e; border-color: #1e293b; color: #f8fafc; }
+  .dark-theme .modal-header { border-color: #1e293b; }
+  .dark-theme .modal-heading h2 { color: #f8fafc; }
+  .dark-theme .compose-field input, .dark-theme .compose-field textarea, .dark-theme .compose-field select { background: #070b13; border-color: #1e293b; color: #f8fafc; }
+  .dark-theme .compose-field input:focus, .dark-theme .compose-field textarea:focus { border-color: #3b82f6; }
+  .dark-theme .template-bar { background: #080f1b; border-color: #1e293b; }
+  .dark-theme .template-select { background: #0e1726; border-color: #1e293b; color: #f8fafc; }
+  .dark-theme .chip { background: #0e1726; border-color: #1e293b; color: #cbd5e1; }
+  .dark-theme .chip:hover { background: #19263a; color: #f8fafc; }
+  .dark-theme .preview-container { background: #070b13; border-color: #1e293b; }
+  .dark-theme .preview-subject { border-color: #1e293b; color: #f8fafc; }
+  .dark-theme .preview-body { color: #cbd5e1; }
+  .dark-theme .schedule-settings { background: #080e18; border-color: #1e293b; }
+  .dark-theme .setting-input input { background: #060910; border-color: #1e293b; color: #f8fafc; }
+  .dark-theme .preset-chip { background: #0e1726; border-color: #1e293b; color: #94a3b8; }
+  .dark-theme .preset-chip:hover { background: #162439; color: #f8fafc; }
+  .dark-theme .modal-footer { border-color: #1e293b; background: #0c121e; }
+  .dark-theme .lead-preview-strip { background: #080f1b; border-color: #1e293b; color: #94a3b8; }
+  .dark-theme .lead-data-drawer { background: #070b13; border-color: #1e293b; }
+  .dark-theme .lead-mini-table th { background: #0c1422; border-color: #1e293b; color: #94a3b8; }
+  .dark-theme .lead-mini-table td { border-color: #162032; color: #cbd5e1; }
+  .dark-theme .lead-email-cell { color: #60a5fa; }
+  .dark-theme .ab-split-bar { background: #080f1b; border-color: #1e293b; }
+  .dark-theme .ab-split-button { background: #0e1726; border-color: #1e293b; color: #cbd5e1; }
+  .dark-theme .ab-split-button.active { background: #166534; color: white; border-color: #15803d; }
+  .dark-theme .ab-split-badge { background: #14281e; color: #4ade80; }
+  .dark-theme .detail-content-box { background: #070b13; border-color: #1e293b; }
+  .dark-theme .detail-subject-line { background: #0c121e; border-color: #1e293b; }
+  .dark-theme .detail-subject-line h3 { color: #f8fafc; }
+  .dark-theme .detail-body-text { color: #cbd5e1; }
+  .dark-theme .meta-box { background: #080e18; border-color: #1e293b; }
+  .dark-theme .meta-box strong { color: #f8fafc; }
+  .dark-theme .id-text { color: #64748b; }
+  .dark-theme .empty-state h2 { color: #f8fafc; }
+  .dark-theme .empty-state p { color: #64748b; }
+  .dark-theme .sender-existing { border-color: #1e293b; }
+  .dark-theme .sender-item { border-color: #162032; }
+  .dark-theme .sender-detail strong { color: #f8fafc; }
+  .dark-theme .sender-form { background: #080e18; border-color: #1e293b; }
+  .dark-theme .sender-form input { background: #060910; border-color: #1e293b; color: #f8fafc; }
+
   @media (prefers-reduced-motion: reduce) { *, *::before, *::after { animation-duration: .01ms !important; animation-iteration-count: 1 !important; scroll-behavior: auto !important; } }
 `;

@@ -18,7 +18,13 @@ import { redisConnection } from "./config/redis";
 import { emailQueue } from "./queue/emailQueue";
 import { startEmailWorker } from "./queue/emailWorker";
 import { enqueueEmailJob, reconcileScheduledJobs } from "./queue/reconcile";
-import { isValidEmailAddress, makeIdempotencyKey, normalizeRecipients, scheduledTimeForRecipient } from "./queue/scheduling";
+import {
+  interpolateTemplate,
+  isValidEmailAddress,
+  makeIdempotencyKey,
+  normalizeRecipients,
+  scheduledTimeForRecipient,
+} from "./queue/scheduling";
 
 dotenv.config();
 
@@ -305,7 +311,7 @@ app.delete("/api/senders/:id", requireSession, async (req, res) => {
 });
 
 app.post("/api/schedule-email", requireSession, async (req, res) => {
-  const { subject, body, startAt, delayBetweenEmailsSeconds, hourlyLimit, senderId } = req.body;
+  const { subject, body, startAt, delayBetweenEmailsSeconds, hourlyLimit, senderId, subjectB, personalized } = req.body;
   const recipientValues: unknown[] = Array.isArray(req.body.recipients)
     ? req.body.recipients
     : [req.body.recipient];
@@ -315,6 +321,9 @@ app.post("/api/schedule-email", requireSession, async (req, res) => {
   }
   if (!subject || !body || String(subject).length > 998 || String(body).length > 100000) {
     return res.status(400).json({ error: "Subject and body are required and must fit within email limits" });
+  }
+  if (subjectB && String(subjectB).length > 998) {
+    return res.status(400).json({ error: "Variant B subject must fit within 998 characters" });
   }
 
   const startTime = startAt ? new Date(startAt) : new Date();
@@ -343,6 +352,28 @@ app.post("/api/schedule-email", requireSession, async (req, res) => {
       const idempotencyKey = makeIdempotencyKey(userId, idempotencyHeader, recipient);
       const scheduledAt = scheduledTimeForRecipient(startTime, index, sendDelay);
       const selectedSender = configuredSender;
+      const recipientOverride = (personalized && typeof personalized === "object") ? personalized[recipient] : undefined;
+      const isVariantB = Boolean(subjectB) && (index % 2 === 1);
+      const rawSubject = isVariantB
+        ? (recipientOverride?.subjectB ? String(recipientOverride.subjectB) : String(subjectB))
+        : (recipientOverride?.subject ? String(recipientOverride.subject) : String(subject));
+      const rawBody = recipientOverride?.body ? String(recipientOverride.body) : String(body);
+
+      const emailUser = recipient.split("@")[0] || "";
+      const emailDomain = recipient.split("@")[1] || "";
+      const defaultName = emailUser.replace(/[._-]/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
+      const defaultCompany = emailDomain.split(".")[0]?.toUpperCase() || "";
+
+      const leadVars: Record<string, string> = {
+        email: recipient,
+        name: recipientOverride?.name || defaultName,
+        company: recipientOverride?.company || defaultCompany,
+        ...(recipientOverride?.vars || {}),
+      };
+
+      const itemSubject = interpolateTemplate(rawSubject, leadVars);
+      const itemBody = interpolateTemplate(rawBody, leadVars);
+
       let emailJob = await prisma.emailJob.findUnique({ where: { idempotencyKey } });
       if (!emailJob) {
         emailJob = await prisma.emailJob.create({
@@ -350,8 +381,8 @@ app.post("/api/schedule-email", requireSession, async (req, res) => {
             userId,
             senderId: selectedSender?.id ?? null,
             recipient,
-            subject: String(subject),
-            body: String(body),
+            subject: itemSubject,
+            body: itemBody,
             scheduledAt,
             hourlyLimit: cap,
             idempotencyKey,

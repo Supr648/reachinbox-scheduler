@@ -5,6 +5,7 @@ import {
   makeIdempotencyKey,
   normalizeRecipients,
   scheduledTimeForRecipient,
+  interpolateTemplate,
 } from "./scheduling";
 
 test("normalizes and deduplicates recipient addresses", () => {
@@ -28,4 +29,12 @@ test("creates stable, recipient-specific idempotency keys", () => {
   const key = makeIdempotencyKey("user-1", "request-1", "ada@example.com");
   assert.equal(makeIdempotencyKey("user-1", "request-1", "ada@example.com"), key);
   assert.notEqual(makeIdempotencyKey("user-1", "request-1", "grace@example.com"), key);
+});
+
+test("interpolates template tags case-insensitively while preserving missing tags", () => {
+  const result = interpolateTemplate("Hello {{name}} at {{Company}}, check {{missing}}!", {
+    name: "Alex",
+    company: "Acme Corp",
+  });
+  assert.equal(result, "Hello Alex at Acme Corp, check {{missing}}!");
 });

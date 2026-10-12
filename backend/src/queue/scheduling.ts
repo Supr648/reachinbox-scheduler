@@ -13,3 +13,6 @@ export const scheduledTimeForRecipient = (startAt: Date, index: number, delaySec
 
 export const makeIdempotencyKey = (userId: string, requestKey: string, recipient: string) =>
   createHash("sha256").update(`${userId}:${requestKey}:${recipient}`).digest("hex");
+
+export const interpolateTemplate = (template: string, variables: Record<string, string>) =>
+  template.replace(/\{\{([a-zA-Z0-9_-]+)\}\}/gi, (_, key) => variables[key.toLowerCase()] ?? `{{${key}}}`);
