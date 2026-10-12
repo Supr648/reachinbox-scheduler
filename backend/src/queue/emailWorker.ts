@@ -53,8 +53,8 @@ export const startEmailWorker = () => {
         await prisma.emailJob.update({ where: { id: jobId }, data: { scheduledAt } });
         try {
           await esClient.update({ index: INDEX_NAME, id: jobId, doc: { scheduledAt } });
-        } catch (error) {
-          console.warn("[Elasticsearch] Failed to update deferred job:", error);
+        } catch (error: any) {
+          console.warn("[Elasticsearch] Failed to update deferred job:", error.message || error);
         }
         await job.moveToDelayed(Date.now() + reservation.delayMs, token);
         throw new DelayedError();
