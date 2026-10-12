@@ -34,7 +34,11 @@ import {
 } from "lucide-react";
 import React, { FormEvent, useEffect, useMemo, useState } from "react";
 
-const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:5000";
+const API_URL =
+  process.env.NEXT_PUBLIC_API_URL ||
+  (typeof window !== "undefined" && window.location.hostname !== "localhost" && window.location.hostname !== "127.0.0.1"
+    ? "https://reachinbox-api-n1c2.onrender.com"
+    : "http://localhost:5000");
 const emailPattern = /\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}\b/gi;
 
 const TEMPLATES = [
