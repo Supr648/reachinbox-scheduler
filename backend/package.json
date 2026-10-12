@@ -11,7 +11,7 @@
         "db:generate": "prisma generate",
         "db:push": "prisma db push",
         "ethereal": "tsx src/scripts/genEthereal.ts",
-        "test": "tsx --test src/queue/scheduling.test.ts",
+        "test": "tsx --test \"src/**/*.test.ts\"",
         "postinstall": "prisma skills sync || exit 0"
     },
     "keywords": [],

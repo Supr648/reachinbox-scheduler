@@ -173,7 +173,7 @@ export default function Page() {
       if (active) setLoadingJobs(false);
     });
     return () => { active = false; };
-  }, [user?.id]);
+  }, [user]);
 
   useEffect(() => {
     if (!user) return;
@@ -183,7 +183,7 @@ export default function Page() {
         .catch(() => undefined);
     }, 10000);
     return () => window.clearInterval(timer);
-  }, [user?.id]);
+  }, [user]);
 
   useEffect(() => {
     const query = search.trim();
@@ -197,7 +197,7 @@ export default function Page() {
         .catch((error: Error) => setActionError(error.message));
     }, 300);
     return () => window.clearTimeout(timer);
-  }, [search, user?.id]);
+  }, [search, user]);
 
   useEffect(() => {
     if (typeof window === "undefined") return;
@@ -405,6 +405,7 @@ export default function Page() {
       <aside className="sidebar">
         <a className="brand" href="#top"><span className="brand-mark"><Mail size={18} /></span><span>reachinbox</span></a>
         <div className="account-card">
+          {/* eslint-disable-next-line @next/next/no-img-element */}
           {user.avatarUrl ? <img className="avatar" src={user.avatarUrl} alt="" /> : <div className="avatar avatar-fallback">{initials(user.name, user.email)}</div>}
           <div className="account-text"><strong>{user.name || "ReachInbox user"}</strong><span>{user.email}</span></div>
           <ChevronDown size={15} />
@@ -438,6 +439,7 @@ export default function Page() {
           <div className="topbar-actions">
             <label className="search-box"><Search size={17} /><input aria-label="Search emails" placeholder="Search emails" value={search} onChange={(event) => setSearch(event.target.value)} />{search && <button aria-label="Clear search" onClick={() => setSearch("")}><X size={14} /></button>}</label>
             <button className="icon-button" title="Refresh emails" aria-label="Refresh emails" onClick={refreshJobs}><RefreshCw size={17} className={loadingJobs ? "spin" : ""} /></button>
+            {/* eslint-disable-next-line @next/next/no-img-element */}
             <button className="user-avatar-button" title="Sign out" onClick={logout}>{user.avatarUrl ? <img src={user.avatarUrl} alt="" /> : initials(user.name, user.email)}</button>
           </div>
         </header>

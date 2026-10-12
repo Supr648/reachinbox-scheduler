@@ -22,3 +22,5 @@ npm-debug.log*
 # Archives and local exports
 *.zip
 reachinbox-scheduler-export/
+*.tsbuildinfo
+.tsupgrader/
