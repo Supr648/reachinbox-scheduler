@@ -168,6 +168,31 @@ export default function Page() {
   const [retryingAll, setRetryingAll] = useState(false);
   const [templatePreview, setTemplatePreview] = useState(false);
   const [selectedTemplate, setSelectedTemplate] = useState("");
+  const [selectedEmail, setSelectedEmail] = useState<EmailJob | null>(null);
+
+  const applySchedulePreset = (preset: "now" | "1hour" | "tomorrow" | "2days") => {
+    const d = new Date();
+    if (preset === "now") {
+      setStartAt(localDateTimeValue(d));
+    } else if (preset === "1hour") {
+      setStartAt(localDateTimeValue(new Date(d.getTime() + 60 * 60 * 1000)));
+    } else if (preset === "tomorrow") {
+      const tomorrow = new Date(d);
+      tomorrow.setDate(tomorrow.getDate() + 1);
+      tomorrow.setHours(9, 0, 0, 0);
+      setStartAt(localDateTimeValue(tomorrow));
+    } else if (preset === "2days") {
+      const future = new Date(d);
+      future.setDate(future.getDate() + 2);
+      future.setHours(10, 0, 0, 0);
+      setStartAt(localDateTimeValue(future));
+    }
+  };
+
+  const totalCount = emails.length;
+  const sentPercent = totalCount > 0 ? (sentCount / totalCount) * 100 : 0;
+  const scheduledPercent = totalCount > 0 ? (scheduledCount / totalCount) * 100 : 0;
+  const failedPercent = totalCount > 0 ? (failedCount / totalCount) * 100 : 0;
 
   const baseEmails = searchResults || emails;
   const visibleEmails = baseEmails.filter((email) => {
@@ -575,6 +600,21 @@ export default function Page() {
               <span className="metric-label">Success Rate</span>
             </div>
           </div>
+          <div className="progress-section">
+            <div className="progress-label-row">
+              <span className="progress-title">QUEUE DISTRIBUTION</span>
+              <span className="progress-legend">
+                <span className="legend-dot sent" /> Delivered ({sentCount})
+                <span className="legend-dot scheduled" /> In Queue ({scheduledCount})
+                {failedCount > 0 && <><span className="legend-dot failed" /> Failed ({failedCount})</>}
+              </span>
+            </div>
+            <div className="multi-progress-bar">
+              <div className="bar-segment sent" style={{ width: `${sentPercent}%` }} title={`Delivered: ${sentCount}`} />
+              <div className="bar-segment scheduled" style={{ width: `${scheduledPercent}%` }} title={`In Queue: ${scheduledCount}`} />
+              <div className="bar-segment failed" style={{ width: `${failedPercent}%` }} title={`Failed: ${failedCount}`} />
+            </div>
+          </div>
         </div>
 
         <div className="list-toolbar">
@@ -616,14 +656,20 @@ export default function Page() {
               {!search && selectedView === "scheduled" && <button className="empty-cta" onClick={() => setComposeOpen(true)}><Plus size={16} /> Schedule an email</button>}
             </div>
           ) : visibleEmails.map((email, index) => (
-            <article className="email-row" key={email.id} style={{ animationDelay: `${Math.min(index * 35, 280)}ms` }}>
+            <article
+              className="email-row clickable-row"
+              key={email.id}
+              onClick={() => setSelectedEmail(email)}
+              title="Click to inspect email details"
+              style={{ animationDelay: `${Math.min(index * 35, 280)}ms` }}
+            >
               <div className="recipient-mark">{initials(null, email.recipient)}</div>
               <div className="email-primary"><div className="email-address">{email.recipient}</div><div className="email-subject">{email.subject || "(no subject)"}</div><div className="email-preview">{email.body}</div></div>
               <div className="email-meta"><span className={`status-pill ${email.status.toLowerCase()}`}>{email.status === "SENDING" ? "Sending" : email.status.toLowerCase()}</span><time>{displayDate(selectedView === "sent" ? email.sentAt : email.scheduledAt)}</time></div>
               <div className="row-action">
-                {email.status === "FAILED" && <button title="Retry email" aria-label="Retry email" onClick={() => updateJob(email, "retry")}><RotateCcw size={16} /></button>}
-                {email.status === "SCHEDULED" && <button title="Cancel scheduled email" aria-label="Cancel scheduled email" onClick={() => updateJob(email, "cancel")}><Trash2 size={16} /></button>}
-                {email.previewUrl && <a title="Open Ethereal preview" aria-label="Open Ethereal preview" href={email.previewUrl} target="_blank" rel="noreferrer"><ArrowUpRight size={16} /></a>}
+                {email.status === "FAILED" && <button title="Retry email" aria-label="Retry email" onClick={(e) => { e.stopPropagation(); updateJob(email, "retry"); }}><RotateCcw size={16} /></button>}
+                {email.status === "SCHEDULED" && <button title="Cancel scheduled email" aria-label="Cancel scheduled email" onClick={(e) => { e.stopPropagation(); updateJob(email, "cancel"); }}><Trash2 size={16} /></button>}
+                {email.previewUrl && <a title="Open Ethereal preview" aria-label="Open Ethereal preview" href={email.previewUrl} target="_blank" rel="noreferrer" onClick={(e) => e.stopPropagation()}><ArrowUpRight size={16} /></a>}
               </div>
             </article>
           ))}
@@ -693,11 +739,23 @@ export default function Page() {
                 </>
               )}
             </div>
-            <div className="schedule-settings"><div className="settings-heading"><span>DELIVERY SETTINGS</span><span>APPLIED PER EMAIL</span></div><div className="settings-grid">
-              <label className="setting-input"><span><CalendarDays size={14} /> Start time</span><input type="datetime-local" value={startAt} onChange={(event) => setStartAt(event.target.value)} /></label>
-              <label className="setting-input"><span><Clock3 size={14} /> Delay between emails</span><div className="number-with-unit"><input type="number" min="0" max="86400" value={sendDelay} onChange={(event) => setSendDelay(event.target.value)} /><small>seconds</small></div></label>
-              <label className="setting-input"><span><Send size={14} /> Hourly limit <em>optional</em></span><div className="number-with-unit"><input type="number" min="1" max="100000" placeholder="Sender default" value={hourlyLimit} onChange={(event) => setHourlyLimit(event.target.value)} /><small>/ hour</small></div></label>
-            </div></div>
+            <div className="schedule-settings">
+              <div className="settings-heading">
+                <span>DELIVERY SETTINGS</span>
+                <div className="preset-chips">
+                  <span className="chips-label">Quick time:</span>
+                  <button type="button" className="preset-chip" onClick={() => applySchedulePreset("now")}>⚡ Now</button>
+                  <button type="button" className="preset-chip" onClick={() => applySchedulePreset("1hour")}>⏱ +1h</button>
+                  <button type="button" className="preset-chip" onClick={() => applySchedulePreset("tomorrow")}>☀️ Tomorrow 9 AM</button>
+                  <button type="button" className="preset-chip" onClick={() => applySchedulePreset("2days")}>📅 +2 Days</button>
+                </div>
+              </div>
+              <div className="settings-grid">
+                <label className="setting-input"><span><CalendarDays size={14} /> Start time</span><input type="datetime-local" value={startAt} onChange={(event) => setStartAt(event.target.value)} /></label>
+                <label className="setting-input"><span><Clock3 size={14} /> Delay between emails</span><div className="number-with-unit"><input type="number" min="0" max="86400" value={sendDelay} onChange={(event) => setSendDelay(event.target.value)} /><small>seconds</small></div></label>
+                <label className="setting-input"><span><Send size={14} /> Hourly limit <em>optional</em></span><div className="number-with-unit"><input type="number" min="1" max="100000" placeholder="Sender default" value={hourlyLimit} onChange={(event) => setHourlyLimit(event.target.value)} /><small>/ hour</small></div></label>
+              </div>
+            </div>
             <div className="modal-footer"><span className="queue-note"><Check size={15} /> Durable queue enabled</span><button type="submit" className="schedule-button" disabled={scheduling || recipients.length === 0 || !subject || !body}>{scheduling ? <Loader2 className="spin" size={16} /> : <CalendarDays size={16} />}{scheduling ? "Scheduling..." : `Schedule ${recipients.length || "emails"}`}</button></div>
           </form>
         </section>
@@ -713,6 +771,79 @@ export default function Page() {
           </form>
         </section>
       </div>}
+
+      {selectedEmail && (
+        <div className="modal-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget) setSelectedEmail(null); }}>
+          <section className="compose-modal detail-modal" role="dialog" aria-modal="true" aria-labelledby="detail-heading">
+            <header className="modal-header">
+              <div className="modal-heading">
+                <span className="modal-mark"><Mail size={17} /></span>
+                <div>
+                  <span className="modal-kicker">EMAIL INSPECTOR</span>
+                  <h2 id="detail-heading">{selectedEmail.recipient}</h2>
+                </div>
+              </div>
+              <button className="icon-button" aria-label="Close details" onClick={() => setSelectedEmail(null)}><X size={18} /></button>
+            </header>
+            <div className="detail-body">
+              <div className="detail-meta-grid">
+                <div className="meta-box">
+                  <span className="meta-label">STATUS</span>
+                  <span className={`status-pill ${selectedEmail.status.toLowerCase()}`}>{selectedEmail.status}</span>
+                </div>
+                <div className="meta-box">
+                  <span className="meta-label">TIMING</span>
+                  <strong>{selectedEmail.sentAt ? `Delivered ${displayDate(selectedEmail.sentAt)}` : `Scheduled ${displayDate(selectedEmail.scheduledAt)}`}</strong>
+                </div>
+                <div className="meta-box">
+                  <span className="meta-label">RECORD ID</span>
+                  <span className="id-text" title={selectedEmail.id}>{selectedEmail.id.slice(0, 16)}...</span>
+                </div>
+              </div>
+
+              {selectedEmail.errorReason && (
+                <div className="detail-error-box" role="alert">
+                  <AlertCircle size={17} />
+                  <div>
+                    <strong>Delivery Issue Details:</strong>
+                    <p>{selectedEmail.errorReason}</p>
+                  </div>
+                </div>
+              )}
+
+              <div className="detail-content-box">
+                <div className="detail-subject-line">
+                  <span className="subject-kicker">Subject:</span>
+                  <h3>{selectedEmail.subject || "(No subject)"}</h3>
+                </div>
+                <div className="detail-body-text">
+                  {selectedEmail.body}
+                </div>
+              </div>
+            </div>
+            <div className="modal-footer detail-footer">
+              <div className="detail-actions">
+                {selectedEmail.previewUrl && (
+                  <a className="schedule-button ethereal-btn" href={selectedEmail.previewUrl} target="_blank" rel="noreferrer">
+                    <ArrowUpRight size={15} /> Open in Ethereal
+                  </a>
+                )}
+                {selectedEmail.status === "FAILED" && (
+                  <button className="schedule-button" onClick={() => { updateJob(selectedEmail, "retry"); setSelectedEmail(null); }}>
+                    <RotateCcw size={15} /> Retry Email
+                  </button>
+                )}
+                {selectedEmail.status === "SCHEDULED" && (
+                  <button className="cancel-pill" onClick={() => { updateJob(selectedEmail, "cancel"); setSelectedEmail(null); }}>
+                    <Trash2 size={15} /> Cancel Scheduled
+                  </button>
+                )}
+              </div>
+              <button className="toolbar-button" onClick={() => setSelectedEmail(null)}>Close</button>
+            </div>
+          </section>
+        </div>
+      )}
 
       {toast && <div className="toast" role="status"><Check size={16} />{toast}<button aria-label="Dismiss notification" onClick={() => setToast("")}><X size={14} /></button></div>}
       <style jsx global>{styles}</style>
@@ -903,8 +1034,43 @@ const styles = `
   .sender-form-grid input { height: 33px; min-width: 0; padding: 0 8px; border: 1px solid #e2e6df; border-radius: 4px; outline: 0; background: white; color: #364139; font-size: 11px; }
   .sender-footer { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-top: 14px; }
   .sender-footer > span { color: #879188; font-size: 9px; }
-  .toast { position: fixed; z-index: 50; right: 22px; bottom: 20px; display: flex; align-items: center; gap: 9px; max-width: min(420px, calc(100vw - 32px)); padding: 12px 13px; border: 1px solid #d8e5d9; border-radius: 6px; background: #f4faf4; box-shadow: 0 9px 30px rgba(30, 54, 37, .12); color: #42664a; font-size: 11px; animation: modal-in .2s ease both; }
-  .toast button { display: grid; margin-left: 5px; place-items: center; border: 0; background: transparent; color: #7a8a7d; cursor: pointer; }
+  .progress-section { grid-column: 1 / -1; display: grid; gap: 7px; margin-top: 4px; padding-top: 10px; border-top: 1px dashed #e3e8e1; }
+  .progress-label-row { display: flex; align-items: center; justify-content: space-between; font-size: 9px; }
+  .progress-title { font-weight: 750; color: #849187; letter-spacing: .5px; }
+  .progress-legend { display: flex; align-items: center; gap: 12px; color: #647367; font-weight: 600; }
+  .legend-dot { display: inline-block; width: 7px; height: 7px; border-radius: 50%; margin-right: 4px; }
+  .legend-dot.sent { background: #3c7d54; }
+  .legend-dot.scheduled { background: #5f7a67; }
+  .legend-dot.failed { background: #b84e40; }
+  .multi-progress-bar { display: flex; height: 6px; overflow: hidden; border-radius: 4px; background: #e8ede6; }
+  .bar-segment { height: 100%; transition: width .3s ease; }
+  .bar-segment.sent { background: #3b7b53; }
+  .bar-segment.scheduled { background: #718d79; }
+  .bar-segment.failed { background: #ba5143; }
+  .clickable-row { cursor: pointer; transition: background .12s ease; }
+  .clickable-row:hover { background: #f7faf6; }
+  .preset-chips { display: flex; align-items: center; gap: 5px; flex-wrap: wrap; margin-left: auto; }
+  .preset-chip { padding: 2px 7px; border: 1px solid #d4ded4; border-radius: 4px; background: white; color: #35533e; font-size: 10px; font-weight: 650; cursor: pointer; transition: all .12s ease; }
+  .preset-chip:hover { background: #e7f2e8; border-color: #a8caa8; }
+  .detail-modal { max-width: 680px; }
+  .detail-body { padding: 18px 24px; display: grid; gap: 16px; }
+  .detail-meta-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; }
+  .meta-box { display: grid; gap: 4px; padding: 10px 12px; border: 1px solid #e4eae2; border-radius: 6px; background: #fafbfa; }
+  .meta-label { color: #879389; font-size: 9px; font-weight: 700; letter-spacing: .5px; }
+  .meta-box strong { font-size: 11px; color: #323d35; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .id-text { font-family: monospace; font-size: 10px; color: #627265; }
+  .detail-error-box { display: flex; align-items: flex-start; gap: 10px; padding: 11px 13px; border: 1px solid #f2c7c2; border-radius: 6px; background: #fff7f6; color: #9d4237; font-size: 11px; }
+  .detail-error-box p { margin: 3px 0 0; line-height: 1.4; color: #ab4c41; }
+  .detail-content-box { border: 1px solid #e2e8df; border-radius: 7px; overflow: hidden; background: white; }
+  .detail-subject-line { display: flex; align-items: baseline; gap: 7px; padding: 11px 14px; border-bottom: 1px solid #edf0ec; background: #fbfdfa; }
+  .subject-kicker { font-size: 11px; color: #808d82; font-weight: 600; }
+  .detail-subject-line h3 { margin: 0; font-size: 13px; font-weight: 700; color: #253328; }
+  .detail-body-text { padding: 14px; color: #313f34; font-size: 12px; line-height: 1.65; white-space: pre-wrap; max-height: 280px; overflow: auto; }
+  .detail-footer { display: flex; justify-content: space-between; align-items: center; }
+  .detail-actions { display: flex; align-items: center; gap: 8px; }
+  .ethereal-btn { text-decoration: none; padding: 0 12px; min-height: 33px; font-size: 11px; }
+  .cancel-pill { display: inline-flex; align-items: center; gap: 6px; min-height: 33px; padding: 0 12px; border: 1px solid #efc5bf; border-radius: 6px; background: #fff5f4; color: #9f4136; font-size: 11px; font-weight: 650; cursor: pointer; }
+  .cancel-pill:hover { background: #feebe8; }
   .login-page { display: grid; min-height: 100vh; grid-template-columns: minmax(360px, .88fr) 1.12fr; background: #f4f6f1; }
   .login-panel { display: flex; width: min(100%, 530px); min-height: 100vh; flex-direction: column; justify-self: center; padding: clamp(30px, 5vw, 68px); background: #fbfcf9; }
   .login-brand { font-size: 20px; }
