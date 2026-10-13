@@ -35,11 +35,10 @@ import {
 import React, { FormEvent, useEffect, useMemo, useState } from "react";
 
 function getApiUrl(): string {
-  if (process.env.NEXT_PUBLIC_API_URL) return process.env.NEXT_PUBLIC_API_URL;
-  if (typeof window !== "undefined" && window.location.hostname !== "localhost" && window.location.hostname !== "127.0.0.1") {
-    return "https://reachinbox-api-n1c2.onrender.com";
+  if (typeof window !== "undefined" && (window.location.hostname === "localhost" || window.location.hostname === "127.0.0.1")) {
+    return process.env.NEXT_PUBLIC_API_URL || "http://localhost:5000";
   }
-  return "http://localhost:5000";
+  return "https://reachinbox-api-n1c2.onrender.com";
 }
 const API_URL = getApiUrl();
 const emailPattern = /\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}\b/gi;
