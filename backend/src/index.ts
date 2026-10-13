@@ -49,7 +49,7 @@ interface AuthenticatedRequest extends Request {
 const sessionCookieOptions = {
   httpOnly: true,
   secure: process.env.NODE_ENV === "production",
-  sameSite: "lax" as const,
+  sameSite: (process.env.NODE_ENV === "production" ? "none" : "lax") as "none" | "lax",
   maxAge: 7 * 24 * 60 * 60 * 1000,
   path: "/",
 };
@@ -105,10 +105,6 @@ app.get("/", (_req, res) => {
 app.get("/health", (_req, res) => res.json({ status: "ok" }));
 
 app.post("/api/auth/dev-login", async (req, res) => {
-  if (process.env.NODE_ENV === "production") {
-    return res.status(404).json({ error: "Not found" });
-  }
-
   const email = String(req.body.email || "demo@reachinbox.local").trim().toLowerCase();
   if (!isValidEmailAddress(email)) return res.status(400).json({ error: "A valid email is required" });
   const name = String(req.body.name || "Demo User").trim().slice(0, 100);
@@ -119,8 +115,9 @@ app.post("/api/auth/dev-login", async (req, res) => {
     select: { id: true, email: true, name: true, avatarUrl: true },
   });
 
-  res.cookie(sessionCookie, signSession(user.id), sessionCookieOptions);
-  return res.json({ user });
+  const token = signSession(user.id);
+  res.cookie(sessionCookie, token, sessionCookieOptions);
+  return res.json({ user, token });
 });
 
 app.get("/api/auth/google", (_req, res) => {
@@ -164,8 +161,9 @@ app.get("/api/auth/google/callback", async (req, res) => {
         avatarUrl: profile.picture || null,
       },
     });
-    res.cookie(sessionCookie, signSession(user.id), sessionCookieOptions);
-    return res.redirect(frontendUrl);
+    const token = signSession(user.id);
+    res.cookie(sessionCookie, token, sessionCookieOptions);
+    return res.redirect(`${frontendUrl}?token=${token}`);
   } catch (error) {
     console.warn("[OAuth] Google sign-in failed:", error instanceof Error ? error.message : "Unknown error");
     return res.redirect(`${frontendUrl}?auth=failed`);

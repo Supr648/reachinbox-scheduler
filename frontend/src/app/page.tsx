@@ -91,6 +91,12 @@ type ApiError = { error?: string };
 async function apiRequest<T>(path: string, init: RequestInit = {}): Promise<T> {
   const headers = new Headers(init.headers);
   if (init.body && !headers.has("Content-Type")) headers.set("Content-Type", "application/json");
+  if (typeof window !== "undefined") {
+    const token = localStorage.getItem("reachinbox_token");
+    if (token && !headers.has("Authorization")) {
+      headers.set("Authorization", `Bearer ${token}`);
+    }
+  }
   const controller = new AbortController();
   const timeout = window.setTimeout(() => controller.abort(), 8000);
   let response: Response;
@@ -294,6 +300,14 @@ export default function Page() {
 
   useEffect(() => {
     let active = true;
+    if (typeof window !== "undefined") {
+      const params = new URLSearchParams(window.location.search);
+      const incomingToken = params.get("token");
+      if (incomingToken) {
+        localStorage.setItem("reachinbox_token", incomingToken);
+        window.history.replaceState({}, "", window.location.pathname);
+      }
+    }
     apiRequest<{ googleEnabled: boolean }>("/api/auth/options")
       .then((options) => { if (active) setGoogleEnabled(options.googleEnabled); })
       .catch(() => undefined);
@@ -390,6 +404,7 @@ export default function Page() {
 
   const logout = async () => {
     try { await apiRequest<void>("/api/auth/logout", { method: "POST" }); } catch {}
+    if (typeof window !== "undefined") localStorage.removeItem("reachinbox_token");
     setUser(null);
     setEmails([]);
   };
@@ -398,10 +413,13 @@ export default function Page() {
     setLoginBusy(true);
     setLoginError("");
     try {
-      const result = await apiRequest<{ user: User }>("/api/auth/dev-login", {
+      const result = await apiRequest<{ user: User; token?: string }>("/api/auth/dev-login", {
         method: "POST",
         body: JSON.stringify({}),
       });
+      if (result.token && typeof window !== "undefined") {
+        localStorage.setItem("reachinbox_token", result.token);
+      }
       setUser(result.user);
     } catch (error) {
       setLoginError(error instanceof Error ? error.message : "Could not open the demo workspace");
