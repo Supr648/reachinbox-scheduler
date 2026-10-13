@@ -626,18 +626,16 @@ export default function Page() {
             <h1>Thoughtful follow-ups, right on time.</h1>
             <p>Schedule, track, and deliver email sequences from one focused workspace.</p>
           </div>
-          {googleEnabled && (
-            <a className="google-button" href={`${getApiUrl()}/api/auth/google`}>
-              <span className="google-g">G</span>
-              Continue with Google
-              <ArrowUpRight size={16} />
-            </a>
-          )}
+          <a className="google-button" href={`${getApiUrl()}/api/auth/google`}>
+            <span className="google-g">G</span>
+            Continue with Google
+            <ArrowUpRight size={16} />
+          </a>
           <button
             className="google-button demo-login-button"
             onClick={enterDemoWorkspace}
             disabled={loginBusy}
-            style={googleEnabled ? { marginTop: "10px", background: "#f8fafc", color: "#334155", border: "1px solid #cbd5e1" } : undefined}
+            style={{ marginTop: "12px", background: "#f8fafc", color: "#334155", border: "1px solid #cbd5e1" }}
           >
             {loginBusy ? <Loader2 className="spin" size={16} /> : <Mail size={16} />}
             {loginBusy ? "Opening workspace..." : "Sign in as Demo User"}
