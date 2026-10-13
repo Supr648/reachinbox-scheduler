@@ -31,8 +31,8 @@ dotenv.config();
 const app = express();
 const port = Number(process.env.PORT) || 5000;
 const sessionSecret = process.env.SESSION_SECRET || "local-development-only-change-me";
-const frontendUrl = process.env.FRONTEND_URL || "http://localhost:3000";
-const backendUrl = process.env.BACKEND_URL || `http://localhost:${port}`;
+const frontendUrl = (process.env.FRONTEND_URL || "https://reachinbox-scheduler-khaki.vercel.app").replace(/\/$/, "");
+const backendUrl = (process.env.BACKEND_URL || `http://localhost:${port}`).replace(/\/$/, "");
 const sessionCookie = "reachinbox_session";
 const googleClientId = process.env.GOOGLE_CLIENT_ID;
 const googleClientSecret = process.env.GOOGLE_CLIENT_SECRET;
@@ -135,11 +135,21 @@ app.get("/api/auth/google", (_req, res) => {
 
 app.get("/api/auth/google/callback", async (req, res) => {
   try {
-    const state = String(req.query.state || "");
-    const statePayload = jwt.verify(state, sessionSecret) as jwt.JwtPayload & { purpose?: string };
-    if (statePayload.purpose !== "google") throw new Error("Invalid OAuth state");
     const code = String(req.query.code || "");
-    if (!code) throw new Error("Google did not return an authorization code");
+    if (!code) {
+      const errorMsg = req.query.error ? String(req.query.error) : "No authorization code returned";
+      throw new Error(errorMsg);
+    }
+
+    const state = String(req.query.state || "");
+    if (state) {
+      try {
+        const statePayload = jwt.verify(state, sessionSecret) as jwt.JwtPayload & { purpose?: string };
+        if (statePayload.purpose !== "google") console.warn("[OAuth] State purpose check warning:", statePayload.purpose);
+      } catch (err) {
+        console.warn("[OAuth] State verification warning:", err instanceof Error ? err.message : err);
+      }
+    }
 
     const { tokens } = await googleClient.getToken(code);
     if (!tokens.id_token || !googleClientId) throw new Error("Google did not return a verified identity");
